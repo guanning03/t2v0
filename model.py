@@ -64,10 +64,12 @@ class Model:
         print(f'Model_id is {model_id}, which is a model of {self.pipe_dict[model_type]}. \nThis was defined as self.pipe later, using from_pretrained method.')
         # 似乎pipe要有from_pretrained的方法
 
+        # （这个问题已经修好了）
         # 在执行customization即run_text2video_customized.py时：
         # 问题：如果diffusers用0.14.0的版本，下面这句话会报错，显示vae的keys和AutoencoderKL并不匹配
         # 而如果diffusers用0.17.0的版本，下面这句话依然会报错，显示
         # "to() received an invalid combination of arguments - got (torch.dtype, NoneType), but expected..."
+        
         self.pipe = self.pipe_dict[model_type].from_pretrained(\
             model_id, safety_checker=safety_checker, **kwargs).to(self.device).to(self.dtype)
         self.model_type = model_type
