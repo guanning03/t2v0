@@ -4,16 +4,17 @@ import numpy as np
 import tomesd
 import torch
 
-from diffusers import StableDiffusionInstructPix2PixPipeline, StableDiffusionControlNetPipeline, ControlNetModel, UNet2DConditionModel
+from diffusers import StableDiffusionInstructPix2PixPipeline, StableDiffusionControlNetPipeline, ControlNetModel, UNet2DConditionModel, DiffusionPipeline
 from diffusers.schedulers import EulerAncestralDiscreteScheduler, DDIMScheduler
 from text_to_video_pipeline import TextToVideoPipeline
-
+from text_to_video_customized_pipeline import TextToVideoCustomizedPipeline
 import utils
 import gradio_utils
 import os
 on_huggingspace = os.environ.get("SPACE_AUTHOR_NAME") == "PAIR"
 
 
+# ModelType 是一个类型，里面枚举了6个可能值，分别为Pix2Pix_Video等
 class ModelType(Enum):
     Pix2Pix_Video = 1,
     Text2Video = 2,
@@ -21,6 +22,7 @@ class ModelType(Enum):
     ControlNetCannyDB = 4,
     ControlNetPose = 5,
     ControlNetDepth = 6,
+    Text2Video_Customized = 7,
 
 
 class Model:
@@ -28,6 +30,7 @@ class Model:
         self.device = device
         self.dtype = dtype
         self.generator = torch.Generator(device=device)
+        # pipe_dict将ModelType的所有可能值与对应的className相对应
         self.pipe_dict = {
             ModelType.Pix2Pix_Video: StableDiffusionInstructPix2PixPipeline,
             ModelType.Text2Video: TextToVideoPipeline,
@@ -35,7 +38,9 @@ class Model:
             ModelType.ControlNetCannyDB: StableDiffusionControlNetPipeline,
             ModelType.ControlNetPose: StableDiffusionControlNetPipeline,
             ModelType.ControlNetDepth: StableDiffusionControlNetPipeline,
+            ModelType.Text2Video_Customized: TextToVideoCustomizedPipeline,
         }
+        print("show enum meanings: ", type(self.pipe_dict[ModelType.Pix2Pix_Video]), self.pipe_dict[ModelType.Pix2Pix_Video])
         self.controlnet_attn_proc = utils.CrossFrameAttnProcessor(
             unet_chunk_size=2)
         self.pix2pix_attn_proc = utils.CrossFrameAttnProcessor(
@@ -56,7 +61,14 @@ class Model:
         torch.cuda.empty_cache()
         gc.collect()
         safety_checker = kwargs.pop('safety_checker', None)
-        self.pipe = self.pipe_dict[model_type].from_pretrained(
+        print(f'Model_id is {model_id}, which is a model of {self.pipe_dict[model_type]}. \nThis was defined as self.pipe later, using from_pretrained method.')
+        # 似乎pipe要有from_pretrained的方法
+
+        # 在执行customization即run_text2video_customized.py时：
+        # 问题：如果diffusers用0.14.0的版本，下面这句话会报错，显示vae的keys和AutoencoderKL并不匹配
+        # 而如果diffusers用0.17.0的版本，下面这句话依然会报错，显示
+        # "to() received an invalid combination of arguments - got (torch.dtype, NoneType), but expected..."
+        self.pipe = self.pipe_dict[model_type].from_pretrained(\
             model_id, safety_checker=safety_checker, **kwargs).to(self.device).to(self.dtype)
         self.model_type = model_type
         self.model_name = model_id
@@ -456,6 +468,7 @@ class Model:
             if use_cf_attn:
                 self.pipe.unet.set_attn_processor(
                     processor=self.text2video_attn_proc)
+            print("successfully updated the model")
         self.generator.manual_seed(seed)
 
         added_prompt = "high quality, HD, 8K, trending on artstation, high focus, dramatic lighting"
@@ -493,3 +506,75 @@ class Model:
                                 chunk_size=chunk_size,
                                 )
         return utils.create_video(result, fps, path=path, watermark=gradio_utils.logo_name_to_path(watermark))
+
+    def process_customized_text2video(self,
+                                      prompt,
+                                      model_name,
+                                      motion_field_strength_x=12,
+                                      motion_field_strength_y=12,
+                                      t0=44,
+                                      t1=47,
+                                      n_prompt="",
+                                      chunk_size=8,
+                                      video_length=8,
+                                      watermark='Picsart AI Research',
+                                      merging_ratio=0.0,
+                                      seed=0,
+                                      resolution=512,
+                                      fps=2,
+                                      use_cf_attn=True,
+                                      use_motion_field=True,
+                                      smooth_bg=False,
+                                      smooth_bg_strength=0.4,
+                                      path=None):
+        print("Module Text2Video Customized")
+        if self.model_type != ModelType.Text2Video_Customized or model_name != self.model_name:
+            print("Model update")
+            unet = UNet2DConditionModel.from_pretrained(
+                model_name, subfolder="unet")
+            
+            
+            self.set_model(ModelType.Text2Video_Customized,
+                           model_id=model_name, unet=unet)
+            self.pipe.scheduler = DDIMScheduler.from_config(
+                self.pipe.scheduler.config)
+            if use_cf_attn:
+                self.pipe.unet.set_attn_processor(
+                    processor=self.text2video_attn_proc)
+        self.generator.manual_seed(seed)
+
+        added_prompt = "high quality, HD, 8K, trending on artstation, high focus, dramatic lighting"
+        negative_prompts = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer difits, cropped, worst quality, low quality, deformed body, bloated, ugly, unrealistic'
+
+        prompt = prompt.rstrip()
+        if len(prompt) > 0 and (prompt[-1] == "," or prompt[-1] == "."):
+            prompt = prompt.rstrip()[:-1]
+        prompt = prompt.rstrip()
+        prompt = prompt + ", "+added_prompt
+        if len(n_prompt) > 0:
+            negative_prompt = n_prompt
+        else:
+            negative_prompt = None
+
+        result = self.inference(prompt=prompt,
+                                video_length=video_length,
+                                height=resolution,
+                                width=resolution,
+                                num_inference_steps=50,
+                                guidance_scale=7.5,
+                                guidance_stop_step=1.0,
+                                t0=t0,
+                                t1=t1,
+                                motion_field_strength_x=motion_field_strength_x,
+                                motion_field_strength_y=motion_field_strength_y,
+                                use_motion_field=use_motion_field,
+                                smooth_bg=smooth_bg,
+                                smooth_bg_strength=smooth_bg_strength,
+                                seed=seed,
+                                output_type='numpy',
+                                negative_prompt=negative_prompt,
+                                merging_ratio=merging_ratio,
+                                split_to_chunks=True,
+                                chunk_size=chunk_size,
+                                )
+        return utils.create_video(result, fps, path=path, watermark=gradio_utils.logo_name_to_path(watermark))        
