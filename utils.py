@@ -194,7 +194,7 @@ class CrossFrameAttnProcessor:
         is_cross_attention = encoder_hidden_states is not None
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
-        elif attn.cross_attention_norm:
+        elif attn.norm_cross:
             encoder_hidden_states = attn.norm_cross(encoder_hidden_states)
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)

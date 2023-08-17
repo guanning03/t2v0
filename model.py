@@ -71,7 +71,7 @@ class Model:
         # "to() received an invalid combination of arguments - got (torch.dtype, NoneType), but expected..."
         
         self.pipe = self.pipe_dict[model_type].from_pretrained(\
-            model_id, safety_checker=safety_checker, **kwargs).to(self.device).to(self.dtype)
+            model_id, safety_checker=safety_checker, **kwargs).to(self.device, self.dtype)
         self.model_type = model_type
         self.model_name = model_id
 
