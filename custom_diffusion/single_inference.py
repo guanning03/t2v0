@@ -5,9 +5,9 @@ pipe = DiffusionPipeline.from_pretrained(
     "CompVis/stable-diffusion-v1-4", torch_dtype=torch.float16
 ).to("cuda")
 pipe.unet.load_attn_procs(
-    "path-to-save-model", weight_name="pytorch_custom_diffusion_weights.bin"
+    "outputs_cat", weight_name="pytorch_custom_diffusion_weights.bin"
 )
-pipe.load_textual_inversion("path-to-save-model", weight_name="<new1>.bin")
+pipe.load_textual_inversion("outputs_cat", weight_name="<new1>.bin")
 
 image = pipe(
     "<new1> cat sitting in a bucket",

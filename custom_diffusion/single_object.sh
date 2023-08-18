@@ -1,5 +1,5 @@
 export MODEL_NAME="CompVis/stable-diffusion-v1-4"
-export OUTPUT_DIR="path-to-save-model"
+export OUTPUT_DIR="outputs_cat"
 export INSTANCE_DIR="./data/cat"
 
 accelerate launch train_custom_diffusion.py \

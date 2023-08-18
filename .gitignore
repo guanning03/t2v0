@@ -3,4 +3,4 @@ annotator/ckpts/
 printouts/
 dreambooth/
 hong/
-custom_diffusion/outputs
+custom_diffusion/outputs*/

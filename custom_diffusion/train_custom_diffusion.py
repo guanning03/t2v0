@@ -26,7 +26,6 @@ import warnings
 from pathlib import Path
 
 import numpy as np
-import safetensors
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
@@ -297,19 +296,14 @@ class CustomDiffusionDataset(Dataset):
         return example
 
 
-def save_new_embed(text_encoder, modifier_token_id, accelerator, args, output_dir, safe_serialization=True):
+def save_new_embed(text_encoder, modifier_token_id, accelerator, args, output_dir):
     """Saves the new token embeddings from the text encoder."""
     logger.info("Saving embeddings")
     learned_embeds = accelerator.unwrap_model(text_encoder).get_input_embeddings().weight
     for x, y in zip(modifier_token_id, args.modifier_token):
         learned_embeds_dict = {}
         learned_embeds_dict[y] = learned_embeds[x]
-        filename = f"{output_dir}/{y}.bin"
-
-        if safe_serialization:
-            safetensors.torch.save_file(learned_embeds_dict, filename, metadata={"format": "pt"})
-        else:
-            torch.save(learned_embeds_dict, filename)
+        torch.save(learned_embeds_dict, f"{output_dir}/{y}.bin")
 
 
 def parse_args(input_args=None):
@@ -611,11 +605,6 @@ def parse_args(input_args=None):
         action="store_true",
         help="Dont apply augmentation during data augmentation when this flag is enabled.",
     )
-    parser.add_argument(
-        "--no_safe_serialization",
-        action="store_true",
-        help="If specified save the checkpoint not in `safetensors` format, but in original PyTorch format instead.",
-    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -707,7 +696,6 @@ def main(args):
                 assert (
                     class_images_dir / "images"
                 ).exists(), f"Please run: python retrieve.py --class_prompt \"{concept['class_prompt']}\" --class_data_dir {class_images_dir} --num_class_images {args.num_class_images}"
-                
                 assert (
                     len(list((class_images_dir / "images").iterdir())) == args.num_class_images
                 ), f"Please run: python retrieve.py --class_prompt \"{concept['class_prompt']}\" --class_data_dir {class_images_dir} --num_class_images {args.num_class_images}"
@@ -1256,15 +1244,8 @@ def main(args):
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         unet = unet.to(torch.float32)
-        unet.save_attn_procs(args.output_dir, safe_serialization=not args.no_safe_serialization)
-        save_new_embed(
-            text_encoder,
-            modifier_token_id,
-            accelerator,
-            args,
-            args.output_dir,
-            safe_serialization=not args.no_safe_serialization,
-        )
+        unet.save_attn_procs(args.output_dir)
+        save_new_embed(text_encoder, modifier_token_id, accelerator, args, args.output_dir)
 
         # Final inference
         # Load previous pipeline
@@ -1275,15 +1256,9 @@ def main(args):
         pipeline = pipeline.to(accelerator.device)
 
         # load attention processors
-        weight_name = (
-            "pytorch_custom_diffusion_weights.safetensors"
-            if not args.no_safe_serialization
-            else "pytorch_custom_diffusion_weights.bin"
-        )
-        pipeline.unet.load_attn_procs(args.output_dir, weight_name=weight_name)
+        pipeline.unet.load_attn_procs(args.output_dir, weight_name="pytorch_custom_diffusion_weights.bin")
         for token in args.modifier_token:
-            token_weight_name = f"{token}.safetensors" if not args.no_safe_serialization else f"{token}.bin"
-            pipeline.load_textual_inversion(args.output_dir, weight_name=token_weight_name)
+            pipeline.load_textual_inversion(args.output_dir, weight_name=f"{token}.bin")
 
         # run inference
         if args.validation_prompt and args.num_validation_images > 0:
